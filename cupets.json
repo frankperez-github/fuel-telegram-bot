@@ -1,0 +1,21 @@
+{
+    "cupets": [],
+    "users": [
+        {
+            "username": "frankperez24",
+            "is_admin": true,
+            "api_id": "29017035",
+            "api_hash": "54c80769a839cced9d174fd1168698cf",
+            "scheduled_turnos": [],
+            "scheduled_envios": []
+        },
+        {
+            "username": "shanik73",
+            "api_id": "24799930",
+            "api_hash": "086e5c9d6b1a332a92a69d1a33cc8b3f",
+            "is_admin": false,
+            "scheduled_turnos": [],
+            "scheduled_envios": []
+        }
+    ]
+}
