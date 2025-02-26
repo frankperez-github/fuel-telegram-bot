@@ -529,7 +529,7 @@ async def handle_schedule_turno(callback: types.CallbackQuery):
         await callback.message.edit_text('Primero debes crear al menos un Cupet.', reply_markup=menu_principal(callback.from_user.username))
         return
 
-    botones = [[types.InlineKeyboardButton(text=c['name'], callback_data=f'select_cupet_schedule:{c["username"]}') for c in data['cupets']]]
+    botones = [[types.InlineKeyboardButton(text=c['name'], callback_data=f'select_cupet_schedule:{c["username"]}')] for c in data['cupets']]
     botones.append([types.InlineKeyboardButton(text='🔙 Cancelar', callback_data='back_to_main')])
     await callback.message.edit_text('⏰ Selecciona un Cupet para programar:', reply_markup=types.InlineKeyboardMarkup(inline_keyboard=botones))
 
