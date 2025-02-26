@@ -160,6 +160,58 @@ async def comando_inicio(message: types.Message):
 async def volver_menu_principal(callback: types.CallbackQuery):
     await callback.message.edit_text('Menú Principal:', reply_markup=menu_principal(callback.from_user.username))
 
+# Handlers de gestión de usuarios
+@router.callback_query(F.data == 'add_user')
+async def start_add_user(callback: types.CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.username):
+        await callback.answer("Acceso denegado", show_alert=True)
+        return
+    
+    await state.set_state(Form.waiting_for_new_user_username)
+    await callback.message.answer("Envía el nombre de usuario del nuevo usuario (sin @):")
+
+@router.message(Form.waiting_for_new_user_username)
+async def get_new_user_username(message: types.Message, state: FSMContext):
+    if is_registered(message.text):
+        await message.answer("❌ Este usuario ya está registrado")
+        return
+    
+    await state.update_data(username=message.text)
+    await state.set_state(Form.waiting_for_new_user_api_id)
+    await message.answer("Envía el API ID del usuario:")
+
+@router.message(Form.waiting_for_new_user_api_id)
+async def get_new_user_api_id(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("❌ El API ID debe ser numérico")
+        return
+    
+    await state.update_data(api_id=message.text)
+    await state.set_state(Form.waiting_for_new_user_api_hash)
+    await message.answer("Envía el API HASH del usuario:")
+
+@router.message(Form.waiting_for_new_user_api_hash)
+async def get_new_user_api_hash(message: types.Message, state: FSMContext):
+    data_user = await state.get_data()
+    
+    new_user = {
+        "username": data_user['username'],
+        "api_id": data_user['api_id'],
+        "api_hash": message.text,
+        "is_admin": False,
+        "scheduled_turnos": []
+    }
+    
+    data['users'].append(new_user)
+    save_data()
+    
+    await message.answer(f"✅ Usuario @{data_user['username']} registrado exitosamente!")
+    await state.clear()
+
+@router.callback_query(F.data == 'back_to_main')
+async def volver_menu_principal(callback: types.CallbackQuery):
+    await callback.message.edit_text('Menú Principal:', reply_markup=menu_principal(callback.from_user.username))
+
 
 # Handlers de Cupets (solo admin)
 @router.callback_query(F.data == 'manage_cupets')
