@@ -3,15 +3,21 @@ import asyncio
 from datetime import datetime, timedelta
 from telethon import TelegramClient
 import pytz 
-import re
+import os
 
 # Timezone setup
 NY_TZ = pytz.timezone('America/New_York')
 
 
 async def send_message(api_id, api_hash, group_username="", message=""):
+    # Define a custom directory for session files
+    session_dir = "telethon_sessions"
+    os.makedirs(session_dir, exist_ok=True)  # Create the directory if it doesn't exist
+
+    # Create a session file path
     session_name = f"session_{api_id}"
-    async with TelegramClient(session_name, api_id, api_hash) as client:
+    session_path = os.path.join(session_dir, session_name)
+    async with TelegramClient(session_path, api_id, api_hash) as client:
         await client.send_message(group_username, message)
 
 async def schedule_task(target_time, group_username, message_text, api_id, api_hash):

@@ -167,8 +167,15 @@ async def comando_inicio(message: types.Message, state: FSMContext):
         await message.answer("Error: usuario no encontrado en los registros.")
         return
     try:
-        # Validate the session
-        client = TelegramClient(f"session_{user_data['api_id']}", user_data['api_id'], user_data['api_hash'])
+        # Define a custom directory for session files
+        session_dir = "telethon_sessions"
+        os.makedirs(session_dir, exist_ok=True)  # Create the directory if it doesn't exist
+
+        # Create a session file path
+        session_name = f"session_{user_data['api_id']}"
+        session_path = os.path.join(session_dir, session_name)
+        
+        client = TelegramClient(session_path, user_data['api_id'], user_data['api_hash'])
         await client.connect()
         await client.start()
         await message.answer('¡Bienvenido! Selecciona una opción:', reply_markup=menu_principal(user.username))
@@ -629,77 +636,6 @@ async def recibir_hora_programacion(message: types.Message, state: FSMContext):
     await state.update_data(time=message.text)
     await message.answer('🚗 Ahora envía la chapa del vehículo:')
     await state.set_state(Form.waiting_for_schedule_chapa)
-
-
-async def generate_otp(user):
-    session_name = f"session_{user['api_id']}"
-    try:
-        client = TelegramClient(session_name, user['api_id'], user['api_hash'])
-        await client.connect()
-        
-        # Send OTP code request with retry count
-        result = await client.send_code_request(user['phone'], _retry_count=3)
-        phone_code_hash = result.phone_code_hash
-        
-        # Return data needed for the next step
-        return {
-            'client': client,
-            'phone_code_hash': phone_code_hash,
-            'session_name': session_name
-        }
-        
-    except errors.PhoneNumberInvalidError:
-        print("❌ Invalid phone number. Please check the phone number format.")
-        return None
-    except errors.PhoneNumberBannedError:
-        print("❌ The phone number is banned on Telegram.")
-        return None
-    except errors.PhoneNumberUnoccupiedError:
-        print("❌ The phone number is not registered on Telegram.")
-        return None
-    except errors.FloodWaitError as e:
-        print(f"❌ Too many requests. Try again in {e.seconds} seconds.")
-        return None
-    except Exception as e:
-        print(f"❌ Error generating OTP: {str(e)}")
-        return None
-    finally:
-        if 'client' in locals():
-            await client.disconnect()
-
-async def verify_otp(user, otp, phone_code_hash, session_name):
-    try:
-        client = TelegramClient(session_name, user['api_id'], user['api_hash'])
-        await client.connect()
-        
-        # Verify the OTP code
-        await client.sign_in(
-            phone=user['phone'],
-            code=otp,
-            phone_code_hash=phone_code_hash
-        )
-        
-        # Save the session for future use
-        await client.session.save()
-        
-        # Verify that the user is authenticated
-        if await client.is_user_authorized():
-            print("✅ Autenticación exitosa!")
-            print(await client.get_me())
-            return client
-        else:
-            print("❌ Falló la autenticación.")
-            return None
-            
-    except errors.SessionPasswordNeededError:
-        print("🔐 Esta cuenta tiene verificación en dos pasos.")
-        return {'requires_2fa': True, 'client': client}
-    except errors.PhoneCodeInvalidError:
-        print("❌ Código inválido.")
-        return None
-    except Exception as e:
-        print(f"❌ Error inesperado: {str(e)}")
-        return None
 
 async def get_login_code(client, timeout=30):
     """Attempt to fetch the OTP code from Telegram messages within a timeout period."""

@@ -1,4 +1,4 @@
 .env
 __pycache__/
 .vscode
-session_*
+telethon_sessions/
