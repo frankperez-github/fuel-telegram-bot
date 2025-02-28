@@ -3,15 +3,14 @@ import asyncio
 from datetime import datetime, timedelta
 from telethon import TelegramClient
 import pytz 
-
-# Existing Telethon client setup
-
-session_name = 'fuel-try-session'
+import re
 
 # Timezone setup
 NY_TZ = pytz.timezone('America/New_York')
 
+
 async def send_message(api_id, api_hash, group_username="", message=""):
+    session_name = f"session_{api_id}"
     async with TelegramClient(session_name, api_id, api_hash) as client:
         await client.send_message(group_username, message)
 
@@ -46,6 +45,7 @@ async def schedule_task(target_time, group_username, message_text, api_id, api_h
             try:
                 await send_message(api_id, api_hash, group_username=group_username, message=message_text)
                 print("Message sent successfully!")
+                await asyncio.sleep(1)
                 break  # Exit loop on success.
             except Exception as e:
                 print(f"Error sending message (retrying in 5 seconds): {e}")

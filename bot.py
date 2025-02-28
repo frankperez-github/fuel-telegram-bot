@@ -6,9 +6,15 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import datetime
-from scheduling import schedule_task
+from scheduling import schedule_task, send_message
 import os
+from telethon import TelegramClient, errors
+
 from dotenv import load_dotenv
+
+from telethon.sessions import StringSession
+
+
 
 # Configuración inicial
 DATA_FILE = 'cupets.json'
@@ -70,10 +76,12 @@ class Form(StatesGroup):
     waiting_for_schedule_time = State()
     waiting_for_schedule_chapa = State()
     waiting_for_new_user_username = State()
+    waiting_for_new_user_phone = State()
     waiting_for_new_user_api_id = State()
     waiting_for_new_user_api_hash = State()
     waiting_for_edit_turno_time = State()
     waiting_for_edit_turno_chapa = State()
+
 
 # Teclados
 def menu_principal(user_username):
@@ -144,7 +152,7 @@ def menu_gestion_envios(envios):
 
 # Handlers principales
 @router.message(Command('start'))
-async def comando_inicio(message: types.Message):
+async def comando_inicio(message: types.Message, state: FSMContext):
     user = message.from_user
     if not user.username:
         await message.answer("Por favor, configura un nombre de usuario en Telegram para usar este bot.")
@@ -154,7 +162,20 @@ async def comando_inicio(message: types.Message):
         await message.answer("Para poder comenzar a usar el bot contacta a @frankperez24")
         return
     
-    await message.answer('¡Bienvenido! Selecciona una opción:', reply_markup=menu_principal(user.username))
+    user_data = next((u for u in data['users'] if u['username'] == user.username), None)
+    if not user_data:
+        await message.answer("Error: usuario no encontrado en los registros.")
+        return
+    try:
+        # Validate the session
+        client = TelegramClient(f"session_{user_data['api_id']}", user_data['api_id'], user_data['api_hash'])
+        await client.connect()
+        await client.start()
+        await message.answer('¡Bienvenido! Selecciona una opción:', reply_markup=menu_principal(user.username))
+        await client.disconnect()
+    except Exception as e:
+        print("Error: ", e)
+        return
 
 @router.callback_query(F.data == 'back_to_main')
 async def volver_menu_principal(callback: types.CallbackQuery):
@@ -167,8 +188,14 @@ async def start_add_user(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Acceso denegado", show_alert=True)
         return
     
+    await state.set_state(Form.waiting_for_new_user_phone)
+    await callback.message.answer("📱 Envía el número de teléfono del nuevo usuario (incluye el código de país, sin espacios):")
+
+@router.message(Form.waiting_for_new_user_phone)
+async def get_new_user_phone(message: types.Message, state: FSMContext):
+    await state.update_data(phone=message.text)
     await state.set_state(Form.waiting_for_new_user_username)
-    await callback.message.answer("Envía el nombre de usuario del nuevo usuario (sin @):")
+    await message.answer("👤 Ahora envía el nombre de usuario del nuevo usuario (sin @):")
 
 @router.message(Form.waiting_for_new_user_username)
 async def get_new_user_username(message: types.Message, state: FSMContext):
@@ -178,7 +205,7 @@ async def get_new_user_username(message: types.Message, state: FSMContext):
     
     await state.update_data(username=message.text)
     await state.set_state(Form.waiting_for_new_user_api_id)
-    await message.answer("Envía el API ID del usuario:")
+    await message.answer("🔢 Envía el API ID del usuario:")
 
 @router.message(Form.waiting_for_new_user_api_id)
 async def get_new_user_api_id(message: types.Message, state: FSMContext):
@@ -196,6 +223,7 @@ async def get_new_user_api_hash(message: types.Message, state: FSMContext):
     
     new_user = {
         "username": data_user['username'],
+        "phone": data_user['phone'],
         "api_id": data_user['api_id'],
         "api_hash": message.text,
         "is_admin": False,
@@ -304,7 +332,6 @@ async def actualizar_nombre_cupet(message: types.Message, state: FSMContext):
 @router.callback_query(F.data.startswith('edit_cupet_username:'))
 async def editar_usuario_cupet(callback: types.CallbackQuery, state: FSMContext):
     old_username = callback.data.split(':')[1]
-    print("editando")
     await state.update_data(old_username=old_username)
     await state.set_state(Form.waiting_for_edit_username)
     await callback.message.answer("Envía el nuevo usuario único para este Cupet:")
@@ -441,11 +468,12 @@ async def seleccionar_cupet_turno(callback: types.CallbackQuery, state: FSMConte
 @router.message(Form.waiting_for_turno_description)
 async def recibir_descripcion_turno(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
-    await state.set_state(Form.waiting_for_turno_chapa)
     await message.answer("🚗 Ahora envía la chapa del vehículo:")
+    await state.set_state(Form.waiting_for_turno_chapa)
 
 @router.message(Form.waiting_for_turno_chapa)
 async def recibir_chapa_turno(message: types.Message, state: FSMContext):
+    print(message.from_user.username)
     user = next((u for u in data['users'] if u['username'] == message.from_user.username), None)
     if not user:
         await message.answer("❌ Error: usuario no encontrado.")
@@ -599,8 +627,91 @@ async def recibir_hora_programacion(message: types.Message, state: FSMContext):
         return
     
     await state.update_data(time=message.text)
-    await state.set_state(Form.waiting_for_schedule_chapa)
     await message.answer('🚗 Ahora envía la chapa del vehículo:')
+    await state.set_state(Form.waiting_for_schedule_chapa)
+
+
+async def generate_otp(user):
+    session_name = f"session_{user['api_id']}"
+    try:
+        client = TelegramClient(session_name, user['api_id'], user['api_hash'])
+        await client.connect()
+        
+        # Send OTP code request with retry count
+        result = await client.send_code_request(user['phone'], _retry_count=3)
+        phone_code_hash = result.phone_code_hash
+        
+        # Return data needed for the next step
+        return {
+            'client': client,
+            'phone_code_hash': phone_code_hash,
+            'session_name': session_name
+        }
+        
+    except errors.PhoneNumberInvalidError:
+        print("❌ Invalid phone number. Please check the phone number format.")
+        return None
+    except errors.PhoneNumberBannedError:
+        print("❌ The phone number is banned on Telegram.")
+        return None
+    except errors.PhoneNumberUnoccupiedError:
+        print("❌ The phone number is not registered on Telegram.")
+        return None
+    except errors.FloodWaitError as e:
+        print(f"❌ Too many requests. Try again in {e.seconds} seconds.")
+        return None
+    except Exception as e:
+        print(f"❌ Error generating OTP: {str(e)}")
+        return None
+    finally:
+        if 'client' in locals():
+            await client.disconnect()
+
+async def verify_otp(user, otp, phone_code_hash, session_name):
+    try:
+        client = TelegramClient(session_name, user['api_id'], user['api_hash'])
+        await client.connect()
+        
+        # Verify the OTP code
+        await client.sign_in(
+            phone=user['phone'],
+            code=otp,
+            phone_code_hash=phone_code_hash
+        )
+        
+        # Save the session for future use
+        await client.session.save()
+        
+        # Verify that the user is authenticated
+        if await client.is_user_authorized():
+            print("✅ Autenticación exitosa!")
+            print(await client.get_me())
+            return client
+        else:
+            print("❌ Falló la autenticación.")
+            return None
+            
+    except errors.SessionPasswordNeededError:
+        print("🔐 Esta cuenta tiene verificación en dos pasos.")
+        return {'requires_2fa': True, 'client': client}
+    except errors.PhoneCodeInvalidError:
+        print("❌ Código inválido.")
+        return None
+    except Exception as e:
+        print(f"❌ Error inesperado: {str(e)}")
+        return None
+
+async def get_login_code(client, timeout=30):
+    """Attempt to fetch the OTP code from Telegram messages within a timeout period."""
+    end_time = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < end_time:
+        async for message in client.iter_messages("Telegram"):
+            if message.text:
+                code_match = re.search(r'(\d{5})', message.text)
+                if code_match:
+                    return code_match.group(1)
+        await asyncio.sleep(2)
+    return None
 
 @router.message(Form.waiting_for_schedule_chapa)
 async def programar_turno(message: types.Message, state: FSMContext):
@@ -608,32 +719,35 @@ async def programar_turno(message: types.Message, state: FSMContext):
     time = state_data.get('time')
     cupet_username = state_data.get('cupet_username')
     chapa = message.text.strip()
-    user = next((u for u in data['users'] if u['username'] == message.from_user.username), None)
     
+    user = next((u for u in data['users'] if u['username'] == message.from_user.username), None)
     if not user:
         await message.answer("❌ Error: usuario no encontrado.")
         await state.clear()
         return
 
-    nuevo_envio = {
-        "time": time,
-        "cupet_username": "@"+cupet_username,
-        "chapa": chapa
-    }
-
-    if 'scheduled_envios' not in user:
-        user['scheduled_envios'] = []
-    user['scheduled_envios'].append(nuevo_envio)
-    save_data()
-
-    asyncio.create_task(schedule_task(time, cupet_username, chapa, user["api_id"], user["api_hash"]))
-
+    time = state_data.get('time')
+    cupet_username = state_data.get('cupet_username')
+    
+    # Schedule the task
+    asyncio.create_task(
+        schedule_task(
+            time, 
+            cupet_username, 
+            chapa,
+            user["api_id"], 
+            user["api_hash"]
+        )
+    )
+    
     await message.answer(
-        f'✅ Envío programado para {time} en {cupet_username}\n'
+        f'✅ Envío programado para {time} en @{cupet_username}\n'
         f'🚗 Chapa: {chapa}',
         reply_markup=menu_principal(message.from_user.username)
     )
     await state.clear()
+
+
 
 @router.callback_query(F.data.startswith('cancel_envio:'))
 async def cancel_envio(callback: types.CallbackQuery):
